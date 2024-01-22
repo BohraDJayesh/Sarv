@@ -1,1 +1,3 @@
-﻿
+﻿  Sarv.cpp
+C:\Users\Just Ken\Desktop\Projects\Sarv\Sarv.cpp(104): warning C4715: 'ClearScreen': not all control paths return a value
+  Sarv.vcxproj -> C:\Users\Just Ken\Desktop\Projects\Sarv\x64\Debug\Sarv.exe

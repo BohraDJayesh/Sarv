@@ -6,13 +6,20 @@
 #define WINDOWS_IGNORE_PACKING_MISMATCH
 LONG consoleLength;
 LONG consoleWidth;
-
+HANDLE hConsole;
  void consoleDim( CONSOLE_SCREEN_BUFFER_INFO csbi) {
     //consoleLength = (csbi.srWindow.Right - csbi.srWindow.Left + 1);
      consoleLength = csbi.dwSize.X;
      consoleWidth = csbi.dwSize.Y;
     //consoleWidth = (csbi.srWindow.Bottom - csbi.srWindow.Top + 1);
 }
+
+
+ //function to relocate the pointer to the starting of the terminal.
+ void RelocateCursor(HANDLE hConsole, int X, int Y) {
+     COORD newPosition = { static_cast<SHORT>(X), static_cast<SHORT>(Y) };
+     SetConsoleCursorPosition(hConsole, newPosition);
+ }
 
 // Function to print boundaries and the name "Surv" at top.
 
@@ -55,40 +62,45 @@ void printBoundaries(HANDLE hConsole,CONSOLE_SCREEN_BUFFER_INFO csbi) {
 }
 
 //function to clear the screen.
-#include <iostream>
-#include <Windows.h>
 
-void ClearScreen() {
-    HANDLE hStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
+DWORD ClearScreen() {
+    HANDLE hStdOut;
 
-    if (hStdOut == INVALID_HANDLE_VALUE) {
-        std::cerr << "Error getting console handle: " << GetLastError() << std::endl;
-        return;
+    hStdOut = GetStdHandle(STD_OUTPUT_HANDLE);
+
+    // Fetch existing console mode so we correctly add a flag and not turn off others
+    DWORD mode = 0;
+    if (!GetConsoleMode(hStdOut, &mode))
+    {
+        return ::GetLastError();
     }
 
-    DWORD dwMode = 0;
-    if (!GetConsoleMode(hStdOut, &dwMode)) {
-        std::cerr << "Error getting console mode: " << GetLastError() << std::endl;
-        return;
+    // Hold original mode to restore on exit to be cooperative with other command-line apps.
+    const DWORD originalMode = mode;
+    mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+
+    // Try to set the mode.
+    if (!SetConsoleMode(hStdOut, mode))
+    {
+        return ::GetLastError();
     }
 
-    dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
-
-    if (!SetConsoleMode(hStdOut, dwMode)) {
-        std::cerr << "Error setting console mode: " << GetLastError() << std::endl;
-        return;
+    // Write the sequence for clearing the display.
+    DWORD written = 0;
+    PCWSTR sequence = L"\x1b[2J";
+    if (!WriteConsoleW(hStdOut, sequence, (DWORD)wcslen(sequence), &written, NULL))
+    {
+        // If we fail, try to restore the mode on the way out.
+        SetConsoleMode(hStdOut, originalMode);
+        return ::GetLastError();
     }
 
-    // ANSI escape sequence for clearing the screen
-    const char* clearScreenSequence = "\x1b[2J";
+    // To also clear the scroll back, emit L"\x1b[3J" as well.
+    // 2J only clears the visible window and 3J only clears the scroll back.
 
-    DWORD dwWritten = 0;
-    if (!WriteConsoleA(hStdOut, clearScreenSequence, static_cast<DWORD>(strlen(clearScreenSequence)), &dwWritten, nullptr)) {
-        std::cerr << "Error writing to console: " << GetLastError() << std::endl;
-    }
+    // Restore the mode on the way out to be nice to other command-line applications.
+    SetConsoleMode(hStdOut, originalMode);
 
-    // Restore the original console mode
-    SetConsoleMode(hStdOut, dwMode);
 }
 
 
@@ -97,63 +109,90 @@ std::atomic<bool> exitRequested(false);
 
 // Function to handle Ctrl+C event
 BOOL CtrlHandler(DWORD fdwCtrlType) {
+    DWORD result = ERROR_SUCCESS;
     switch (fdwCtrlType) {
     case CTRL_C_EVENT:
-        // Perform your task here
-        ClearScreen();
+        // Moving to end, and thein printing ctrl+c pressed.
+        RelocateCursor(hConsole, 2, consoleLength-2);
+        std::cout << "^C" << std::endl;
+        
+        result = ClearScreen();
+
+        if (result != 1) {
+            std::cerr << "There are Resource allocated, Wait for few minutes !!!. "<<std::endl<<"Error Code : "  << result << std::endl;
+            return static_cast<int>(result);
+        }
+
+        exit(0);
         return TRUE; // Returning TRUE to prevent the default handler
     default:
         return FALSE;
     }
+   
 }
 
 
 
-//function to relocate the pointer to the starting of the terminal.
-void RelocateCursor(HANDLE hConsole, int X, int Y) {
-    COORD newPosition = { static_cast<SHORT>(X), static_cast<SHORT>(Y) };
-    SetConsoleCursorPosition(hConsole, newPosition);
+//function to move mouse at a particular position. Quest - why not make a lambda function for that ? No we can't cause we have to listen for 
+//different mouse keys as well !!!.
+void moveMouse(HANDLE hConsole, CONSOLE_SCREEN_BUFFER_INFO csbi) {
+    while (true) {
+        int X = csbi.dwCursorPosition.X;
+        int Y = csbi.dwCursorPosition.Y;
+        // Check the state of the arrow keys
+        if (GetAsyncKeyState(VK_LEFT) & 0x8000) {
+            RelocateCursor(hConsole, X-1, Y);
+        }
+
+        if (GetAsyncKeyState(VK_RIGHT) & 0x8000) {
+            RelocateCursor(hConsole, X+1, Y);
+        }
+
+        if (GetAsyncKeyState(VK_UP) & 0x8000) {
+            RelocateCursor(hConsole, X, Y-1);
+        }
+
+        if (GetAsyncKeyState(VK_DOWN) & 0x8000) {
+            RelocateCursor(hConsole, X, Y+1);
+        }
+        
+        // Optional: Add a small delay to reduce CPU usage
+        Sleep(100);
+    }
 }
-
-void ctrlMonitor() {
-
-}
-
-
-
 
 int main(int argc, char* argv[]) {
 
-    // Thread to continously monitor for ctrl+c event.
+    // Event to continously monitor for ctrl+c event.
 
     SetConsoleCtrlHandler((PHANDLER_ROUTINE)CtrlHandler, TRUE);
-    std::thread monitorEvent(ctrlMonitor);
+
 
     //Getting the information of cosole :
 
-    HANDLE hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+    hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
     CONSOLE_SCREEN_BUFFER_INFO csbi; // Stores information regarding console window, like size, width, height etc.
     GetConsoleScreenBufferInfo(hConsole, &csbi);
     consoleDim(csbi);
 
+    //Function or threading for continously listening for mouse movements and do what's required.
+
+    std::thread MouseListen(moveMouse, hConsole, csbi);
 
     // Calling printBoundaries function to print the boundaries accross the terminal.
 
     printBoundaries(hConsole, csbi);
 
     //Relocating the cursor to the starting position of the window.
-    RelocateCursor(hConsole,2,2);
-
-    //More Code goes here, make your changes here rest all should be remained unchanged.
+    RelocateCursor(hConsole, 2, 2);
 
 
-
-
-    char temp = getchar();
-
-    monitorEvent.join();
-    ClearScreen();
     
-
+    while (!exitRequested) {
+        // Sleep to avoid busy-waiting and reduce CPU usage
+        Sleep(100);
+    };
+    
+    MouseListen.join();
 }
 
