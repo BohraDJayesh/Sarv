@@ -2,11 +2,30 @@
 #include <Windows.h>
 #include <cctype>
 #include <thread>
+#include <iomanip>
+
+// ANSI escape codes for cursor and scrolling control
+const char* hideCursor = "\x1b[?25l";
+const char* disableScrolling = "\x1b[?1049h\x1b[H";
+const char* restoreScrolling = "\x1b[?1049l";
+const char* showCursor = "\x1b[?25h";
 
 #define WINDOWS_IGNORE_PACKING_MISMATCH
 LONG consoleLength;
 LONG consoleWidth;
 HANDLE hConsole;
+
+
+//function to print ascii art of Sarv.
+void printAsciiArt() {
+    std::cout << std::setw(3) << "  _________                   " << std::endl;
+    std::cout << std::setw(3) << " /   _____/____ __________  __" << std::endl;
+    std::cout << std::setw(3) << " \_____  \\__  \\_  __ \  \/ /" << std::endl;
+    std::cout << std::setw(3) << " / \ / __ \|  | \ / \ / " << std::endl;
+    std::cout << std::setw(3) << "/_______  (____  /__|    \_/  " << std::endl;
+    std::cout << std::setw(3) << "        \/     \/             " << std::endl;
+}
+
  void consoleDim( CONSOLE_SCREEN_BUFFER_INFO csbi) {
     //consoleLength = (csbi.srWindow.Right - csbi.srWindow.Left + 1);
      consoleLength = csbi.dwSize.X;
@@ -48,9 +67,9 @@ void printBoundaries(HANDLE hConsole,CONSOLE_SCREEN_BUFFER_INFO csbi) {
         for (int j = 0; j < 2*centerX; j++) {
 
             if ((i == 1 || i == 2*centerY - 2))
-                std::cout << "-";
+                std::cout << char(219);
             else if (j == 0 || j == 2*centerX - 1)
-                std::cout << "|";
+                std::cout << char(186);
             else
                 std::cout << " ";
         }
@@ -110,18 +129,20 @@ std::atomic<bool> exitRequested(false);
 // Function to handle Ctrl+C event
 BOOL CtrlHandler(DWORD fdwCtrlType) {
     DWORD result = ERROR_SUCCESS;
+    std::cout << restoreScrolling;
     switch (fdwCtrlType) {
     case CTRL_C_EVENT:
         // Moving to end, and thein printing ctrl+c pressed.
         RelocateCursor(hConsole, 2, consoleLength-2);
         std::cout << "^C" << std::endl;
         
-        result = ClearScreen();
+        //result = 
+            ClearScreen();
 
-        if (result != 1) {
-            std::cerr << "There are Resource allocated, Wait for few minutes !!!. "<<std::endl<<"Error Code : "  << result << std::endl;
-            return static_cast<int>(result);
-        }
+        //if (result != 1) {
+        //    std::cerr << "There are Resource allocated, Wait for few minutes !!!. "<<std::endl<<"Error Code : "  << result << std::endl;
+        //    return static_cast<int>(result);
+        //}
 
         exit(0);
         return TRUE; // Returning TRUE to prevent the default handler
@@ -163,6 +184,18 @@ void moveMouse(HANDLE hConsole, CONSOLE_SCREEN_BUFFER_INFO csbi) {
 
 int main(int argc, char* argv[]) {
 
+    // Disable cursor and scrolling
+    std::cout << disableScrolling;
+
+    //Checking if the arguments are defined are not.
+    if (argc < 2) {
+        printAsciiArt();
+        std::cerr << "Usage: " << argv[0] << " <file_path> -<optional_Arguments>" << std::endl;
+        getchar();
+        //ClearScreen();
+        exit(0);
+    }
+
     // Event to continously monitor for ctrl+c event.
 
     SetConsoleCtrlHandler((PHANDLER_ROUTINE)CtrlHandler, TRUE);
@@ -187,12 +220,19 @@ int main(int argc, char* argv[]) {
     RelocateCursor(hConsole, 2, 2);
 
 
+    std::wstring filePath;
+
+
     
     while (!exitRequested) {
         // Sleep to avoid busy-waiting and reduce CPU usage
         Sleep(100);
     };
     
+
     MouseListen.join();
+
+    // Re-enable cursor and scrolling
+    std::cout << restoreScrolling<< showCursor;
 }
 

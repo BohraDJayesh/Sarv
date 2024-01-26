@@ -1,1 +1,3 @@
-C:\Users\Just Ken\Desktop\Projects\Sarv\x64\Debug\Sarv.exe
+version https://git-lfs.github.com/spec/v1
+oid sha256:b83ea8d956f5fc9c148239a213450d069b1ea416ed5935175f4aa0043247fa44
+size 60
