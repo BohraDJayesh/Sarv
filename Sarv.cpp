@@ -3,6 +3,7 @@
 #include <cctype>
 #include <thread>
 #include <iomanip>
+#include <WinUser.h>
 
 // ANSI escape codes for cursor and scrolling control
 const char* hideCursor = "\x1b[?25l";
@@ -14,14 +15,37 @@ const char* showCursor = "\x1b[?25h";
 LONG consoleLength;
 LONG consoleWidth;
 HANDLE hConsole;
+bool editMode = true;
+HHOOK hHook = NULL;
+
+//Hook for listening to keyLL.
+
+void RelocateCursor(HANDLE hConsole, int X, int Y);
+void moveCursorToLastRow();
+void moveCursorToFirstRow();
+
+LRESULT CALLBACK KeyboardHookProc(int nCode, WPARAM wParam, LPARAM lParam) {
+    if (nCode >= 0) {
+        KBDLLHOOKSTRUCT* kbStruct = (KBDLLHOOKSTRUCT*)lParam;
+        DWORD vkCode = kbStruct->vkCode;
+        if (vkCode == VK_ESCAPE && editMode == true) {
+            editMode = false;
+            moveCursorToLastRow();
+        }
+        else if (vkCode == 'I' && editMode == false) {
+            editMode = true;
+            moveCursorToFirstRow();
+        }
+    }
+    return CallNextHookEx(NULL, nCode, wParam, lParam);
+}
 
 
-//function to print ascii art of Sarv.
 void printAsciiArt() {
     std::cout << std::setw(3) << "  _________                   " << std::endl;
     std::cout << std::setw(3) << " /   _____/____ __________  __" << std::endl;
     std::cout << std::setw(3) << " \_____  \\__  \\_  __ \  \/ /" << std::endl;
-    std::cout << std::setw(3) << " / \ / __ \|  | \ / \ / " << std::endl;
+    std::cout << std::setw(3) << " /        \/ __ \|  | \/\   / " << std::endl;
     std::cout << std::setw(3) << "/_______  (____  /__|    \_/  " << std::endl;
     std::cout << std::setw(3) << "        \/     \/             " << std::endl;
 }
@@ -33,14 +57,10 @@ void printAsciiArt() {
     //consoleWidth = (csbi.srWindow.Bottom - csbi.srWindow.Top + 1);
 }
 
-
- //function to relocate the pointer to the starting of the terminal.
  void RelocateCursor(HANDLE hConsole, int X, int Y) {
      COORD newPosition = { static_cast<SHORT>(X), static_cast<SHORT>(Y) };
      SetConsoleCursorPosition(hConsole, newPosition);
  }
-
-// Function to print boundaries and the name "Surv" at top.
 
 void printBoundaries(HANDLE hConsole,CONSOLE_SCREEN_BUFFER_INFO csbi) {
 
@@ -79,8 +99,6 @@ void printBoundaries(HANDLE hConsole,CONSOLE_SCREEN_BUFFER_INFO csbi) {
 
 
 }
-
-//function to clear the screen.
 
 DWORD ClearScreen() {
     HANDLE hStdOut;
@@ -122,11 +140,8 @@ DWORD ClearScreen() {
 
 }
 
-
-
 std::atomic<bool> exitRequested(false);
 
-// Function to handle Ctrl+C event
 BOOL CtrlHandler(DWORD fdwCtrlType) {
     DWORD result = ERROR_SUCCESS;
     std::cout << restoreScrolling;
@@ -152,39 +167,79 @@ BOOL CtrlHandler(DWORD fdwCtrlType) {
    
 }
 
+void moveCursorToFirstRow() {
+    // Set the cursor position to the first row
+    COORD cursorPosition = { 3, 2 };
+    SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), cursorPosition);
+}
+
+void moveCursorToLastRow() {
+    // Get the console screen buffer size
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi);
+
+    // Set the cursor position to the last row
+    COORD cursorPosition = { 3, csbi.dwSize.Y - 1 };
+    SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), cursorPosition);
+}
 
 
-//function to move mouse at a particular position. Quest - why not make a lambda function for that ? No we can't cause we have to listen for 
-//different mouse keys as well !!!.
-void moveMouse(HANDLE hConsole, CONSOLE_SCREEN_BUFFER_INFO csbi) {
-    while (true) {
-        int X = csbi.dwCursorPosition.X;
-        int Y = csbi.dwCursorPosition.Y;
-        // Check the state of the arrow keys
-        if (GetAsyncKeyState(VK_LEFT) & 0x8000) {
-            RelocateCursor(hConsole, X-1, Y);
+void printRestrictedArea( HANDLE hConsole, const char* buffer, DWORD bufferSize) {
+
+    // Adjusting the loop indices to skip the first two and last two rows and columns
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    GetConsoleScreenBufferInfo(hConsole, &csbi);
+    int width = 2*csbi.dwSize.X;
+    int height = csbi.dwSize.Y - 3;
+    int bufferIndex = 2;
+
+    //RelocateCursor(hConsole, 0, 2);
+    
+    for (int i = 0; i < height-1; i++) {
+        bool isbreak = false;
+        RelocateCursor(hConsole, 0, i + 2);
+
+        for (int j = 0; j < width-1; j++) {
+            if (j == 0) {
+                std::cout << char(186);  // Vertical bar character
+            }
+            else if (j == width - 3) {
+                break;  // Vertical bar character
+            }
+            else if (bufferIndex < static_cast<int>(bufferSize)) {
+                // Print the character from the buffer
+                if (buffer[bufferIndex] == '\n') {
+                    // Handle newline characters by moving to the next line
+                    std::cout << '\n';
+                    RelocateCursor(hConsole, 1, i + 3);
+                    j = 0; bufferIndex++;
+                }
+                else {
+                    std::cout << buffer[bufferIndex++];
+                }
+            }
+            else {
+                isbreak = true;
+                break;
+            }
         }
-
-        if (GetAsyncKeyState(VK_RIGHT) & 0x8000) {
-            RelocateCursor(hConsole, X+1, Y);
-        }
-
-        if (GetAsyncKeyState(VK_UP) & 0x8000) {
-            RelocateCursor(hConsole, X, Y-1);
-        }
-
-        if (GetAsyncKeyState(VK_DOWN) & 0x8000) {
-            RelocateCursor(hConsole, X, Y+1);
-        }
-        
-        // Optional: Add a small delay to reduce CPU usage
-        Sleep(100);
+        if (isbreak)
+            break;
     }
 }
 
+
 int main(int argc, char* argv[]) {
 
-    // Disable cursor and scrolling
+    HINSTANCE hInstance = GetModuleHandle(NULL);
+
+    HHOOK hKeyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, KeyboardHookProc, hInstance, 0);
+    if (hKeyboardHook == NULL) {
+        std::cerr << "Failed to install keyboard hook\n" << GetLastError();
+        return 1;
+    }
+
+
     std::cout << disableScrolling;
 
     //Checking if the arguments are defined are not.
@@ -208,30 +263,51 @@ int main(int argc, char* argv[]) {
     GetConsoleScreenBufferInfo(hConsole, &csbi);
     consoleDim(csbi);
 
-    //Function or threading for continously listening for mouse movements and do what's required.
-
-    std::thread MouseListen(moveMouse, hConsole, csbi);
-
     // Calling printBoundaries function to print the boundaries accross the terminal.
-
     printBoundaries(hConsole, csbi);
 
-    //Relocating the cursor to the starting position of the window.
+    // Relocating the cursor to the starting position of the window.
     RelocateCursor(hConsole, 2, 2);
 
+    //Starting the IO operation.
 
-    std::wstring filePath;
+    // Handling the file input and checking if the file exists or not, if it doesn't creating one, using OPEN_ALWAYS.
+    std::string filePath = argv[1];
+    HANDLE fileHandle = CreateFileA(filePath.c_str(), GENERIC_READ | GENERIC_WRITE , FILE_SHARE_READ, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (fileHandle == INVALID_HANDLE_VALUE) {
+        std::cerr << "Error creating or opening the file !! " << GetLastError() << std::endl;
+        return 1;
+    }
+    DWORD fileSize = GetFileSize(fileHandle, NULL);
+    char* buffer = new char[fileSize];
+
+    DWORD bytesRead;
+
+    //Reading and checking for bytes.
+    if (ReadFile(fileHandle, buffer, fileSize, &bytesRead, NULL) && bytesRead == fileSize) {
+
+        // Printing the buffer to terminal scree.
+        printRestrictedArea(hConsole, buffer, bytesRead);
 
 
+    }
+    else {
+        std::cerr << "Error reading the file. Error code: " << GetLastError() << std::endl;
+    }
     
+
     while (!exitRequested) {
+
         // Sleep to avoid busy-waiting and reduce CPU usage
         Sleep(100);
     };
-    
+    UnhookWindowsHookEx(hKeyboardHook);
+    //Finaly deleting the allocated buffers.
+    delete[] buffer;
 
-    MouseListen.join();
 
+   // Currently On - Halting the keythread and will start using HOOKS for better CPU comsumption and efficiency. -> keyThread.join();
+ 
     // Re-enable cursor and scrolling
     std::cout << restoreScrolling<< showCursor;
 }
