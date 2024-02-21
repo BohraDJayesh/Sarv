@@ -16,29 +16,12 @@ LONG consoleLength;
 LONG consoleWidth;
 HANDLE hConsole;
 bool editMode = true;
-HHOOK hHook = NULL;
 
 //Hook for listening to keyLL.
 
 void RelocateCursor(HANDLE hConsole, int X, int Y);
 void moveCursorToLastRow();
 void moveCursorToFirstRow();
-
-LRESULT CALLBACK KeyboardHookProc(int nCode, WPARAM wParam, LPARAM lParam) {
-    if (nCode >= 0) {
-        KBDLLHOOKSTRUCT* kbStruct = (KBDLLHOOKSTRUCT*)lParam;
-        DWORD vkCode = kbStruct->vkCode;
-        if (vkCode == VK_ESCAPE && editMode == true) {
-            editMode = false;
-            moveCursorToLastRow();
-        }
-        else if (vkCode == 'I' && editMode == false) {
-            editMode = true;
-            moveCursorToFirstRow();
-        }
-    }
-    return CallNextHookEx(NULL, nCode, wParam, lParam);
-}
 
 
 void printAsciiArt() {
@@ -228,16 +211,26 @@ void printRestrictedArea( HANDLE hConsole, const char* buffer, DWORD bufferSize)
     }
 }
 
+void keyListens() {
+    while (true) {
+        if (GetAsyncKeyState(VK_ESCAPE) && editMode == true) {
+            editMode = false;
+            moveCursorToLastRow();
+        }
+        else if (GetAsyncKeyState('I') && editMode == false) {
+            editMode = true;
+            moveCursorToFirstRow();
+        }
+    }
+}
 
 int main(int argc, char* argv[]) {
 
-    HINSTANCE hInstance = GetModuleHandle(NULL);
+    HCURSOR hCursor = LoadCursor(NULL, IDC_IBEAM);
+    SetCursor(hCursor);
 
-    HHOOK hKeyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, KeyboardHookProc, hInstance, 0);
-    if (hKeyboardHook == NULL) {
-        std::cerr << "Failed to install keyboard hook\n" << GetLastError();
-        return 1;
-    }
+
+    HANDLE hThreadtoKey = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)keyListens, NULL, 0,NULL);
 
 
     std::cout << disableScrolling;
@@ -247,7 +240,6 @@ int main(int argc, char* argv[]) {
         printAsciiArt();
         std::cerr << "Usage: " << argv[0] << " <file_path> -<optional_Arguments>" << std::endl;
         getchar();
-        //ClearScreen();
         exit(0);
     }
 
@@ -259,19 +251,19 @@ int main(int argc, char* argv[]) {
     //Getting the information of cosole :
 
     hConsole = GetStdHandle(STD_OUTPUT_HANDLE);
-    CONSOLE_SCREEN_BUFFER_INFO csbi; // Stores information regarding console window, like size, width, height etc.
+    CONSOLE_SCREEN_BUFFER_INFO csbi; 
     GetConsoleScreenBufferInfo(hConsole, &csbi);
     consoleDim(csbi);
 
-    // Calling printBoundaries function to print the boundaries accross the terminal.
     printBoundaries(hConsole, csbi);
 
     // Relocating the cursor to the starting position of the window.
     RelocateCursor(hConsole, 2, 2);
 
-    //Starting the IO operation.
 
+    //Starting the IO operation.
     // Handling the file input and checking if the file exists or not, if it doesn't creating one, using OPEN_ALWAYS.
+
     std::string filePath = argv[1];
     HANDLE fileHandle = CreateFileA(filePath.c_str(), GENERIC_READ | GENERIC_WRITE , FILE_SHARE_READ, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (fileHandle == INVALID_HANDLE_VALUE) {
@@ -285,11 +277,7 @@ int main(int argc, char* argv[]) {
 
     //Reading and checking for bytes.
     if (ReadFile(fileHandle, buffer, fileSize, &bytesRead, NULL) && bytesRead == fileSize) {
-
-        // Printing the buffer to terminal scree.
         printRestrictedArea(hConsole, buffer, bytesRead);
-
-
     }
     else {
         std::cerr << "Error reading the file. Error code: " << GetLastError() << std::endl;
@@ -301,12 +289,12 @@ int main(int argc, char* argv[]) {
         // Sleep to avoid busy-waiting and reduce CPU usage
         Sleep(100);
     };
-    UnhookWindowsHookEx(hKeyboardHook);
+
     //Finaly deleting the allocated buffers.
     delete[] buffer;
+    CloseHandle(hThreadtoKey);
 
-
-   // Currently On - Halting the keythread and will start using HOOKS for better CPU comsumption and efficiency. -> keyThread.join();
+   // Currently On - have to go for keythreads as the hooks are not for me, not experienced enough to use hooks that's all I can conclude from that.;
  
     // Re-enable cursor and scrolling
     std::cout << restoreScrolling<< showCursor;
