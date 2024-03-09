@@ -188,32 +188,54 @@ void doScroll(char key) {
     }
 }
 
-void editScreen(std::vector<char>& buffer) {
+void editScreen(LPVOID vecPointer) {
     INPUT_RECORD inputRecord;
     DWORD numEvents;
     CONSOLE_SCREEN_BUFFER_INFO csbi;
     GetConsoleScreenBufferInfo(hConsole, &csbi);
     COORD cursorPosition = csbi.dwCursorPosition;
-    while (true) {
-        INPUT_RECORD inputRecord;
-        DWORD numEvents;
 
+    std::vector<char>& buffer = *(std::vector<char>*)vecPointer;
+    
+
+    while (true) {
         ReadConsoleInput(GetStdHandle(STD_INPUT_HANDLE), &inputRecord, 1, &numEvents);
         if (inputRecord.EventType == KEY_EVENT && inputRecord.Event.KeyEvent.bKeyDown) {
             char inputChar = inputRecord.Event.KeyEvent.uChar.AsciiChar;
             if (isalnum(inputChar)) {
-                ClearScreen();
-                printBoundaries(hConsole, csbi);
-                buffer.insert(buffer.begin() + cursorPosition.X, inputChar);
-                printRestrictedArea(hConsole, buffer, buffer.size());
+
+                // Check if cursor position is within the buffer bounds
+                if (cursorPosition.X >= 0 && cursorPosition.X <= buffer.size()) {
+
+                    buffer.insert(buffer.begin() + cursorPosition.X, inputChar);
+                    cursorPosition.X++;
+                    SetConsoleCursorPosition(hConsole, cursorPosition);
+
+                }
+                else {
+                    ClearScreen();
+                    // Handle out-of-bounds cursor position error
+                    std::cerr << "Cursor position out of bounds!" << std::endl;
+                }
             }
         }
-
     }
 }
 
-void keyListens(std::vector<char>& buffer) {
+
+
+
+void keyListens(LPVOID vecPointer) {
+
     static HANDLE hThreadtoEdit;
+    //Converting pointer to vector array of char.
+    std::vector<char>& buffer = *(std::vector<char>*)vecPointer;
+   
+
+    // Debug: Print initial cursor position and buffer size.
+    //Still buffer size zero is being passed here, don't know why !! ??.
+    std::cout << "Buffer size: " << buffer.size() << std::endl;
+
     while (true) {
         if (GetAsyncKeyState(VK_ESCAPE) && editMode == true) {
             editMode = false;
@@ -267,12 +289,14 @@ int main(int argc, char* argv[]) {
 
     std::string filePath = argv[1];
     HANDLE fileHandle = CreateFileA(filePath.c_str(), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    ClearScreen();
     if (fileHandle == INVALID_HANDLE_VALUE) {
         std::cerr << "Error creating or opening the file !! " << GetLastError() << std::endl;
         return 1;
     }
     fileSize = GetFileSize(fileHandle, NULL);
     if (fileSize == INVALID_FILE_SIZE) {
+        ClearScreen();
         std::cerr << "Error getting the size of the file. Error code: " << GetLastError() << std::endl;
         CloseHandle(fileHandle);
         return 1;
@@ -294,7 +318,7 @@ int main(int argc, char* argv[]) {
         
     }
     else {
-
+        ClearScreen();
         std::cerr << "Error reading the file. Error code: " << GetLastError() << std::endl;
         CloseHandle(fileHandle);
         return 1;
