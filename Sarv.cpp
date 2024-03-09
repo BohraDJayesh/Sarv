@@ -131,7 +131,7 @@ void moveCursorToLastRow() {
     SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), cursorPosition);
 }
 
-void printRestrictedArea(HANDLE hConsole, const std::vector<char>& buffer, DWORD bufferSize) {
+void printRestrictedArea(HANDLE hConsole, std::vector<char>& buffer, DWORD bufferSize) {
 
     CONSOLE_SCREEN_BUFFER_INFO csbi;
     GetConsoleScreenBufferInfo(hConsole, &csbi);
@@ -153,8 +153,19 @@ void printRestrictedArea(HANDLE hConsole, const std::vector<char>& buffer, DWORD
             else if (bufferIndex < static_cast<int>(bufferSize)) {
                 if (static_cast<char>(buffer[bufferIndex]) == '\n') {
                     std::cout << '\n';
+                    
+                    //Based on the \n and remaining length on the screen, inserting spaces to map correctly curson to the buffer.
+                    
+                    GetConsoleScreenBufferInfo(hConsole, &csbi);
+                    COORD cursorPos = csbi.dwCursorPosition;
+                    SetConsoleCursorPosition(GetStdHandle(STD_OUTPUT_HANDLE), cursorPos);
+                    int spaceNeeded = (width - 3) - cursorPos.X;
+                    buffer.insert(buffer.begin() + cursorPos.X, spaceNeeded, ' ');
+
+                    
                     RelocateCursor(hConsole, 1, i + 3);
-                    j = 0; bufferIndex++;
+                    j = 0; 
+                    bufferIndex += spaceNeeded;
                 }
                 else {
                     std::cout << static_cast<char>(buffer[bufferIndex++]);
@@ -191,7 +202,10 @@ void editScreen(std::vector<char>& buffer) {
         if (inputRecord.EventType == KEY_EVENT && inputRecord.Event.KeyEvent.bKeyDown) {
             char inputChar = inputRecord.Event.KeyEvent.uChar.AsciiChar;
             if (isalnum(inputChar)) {
-                
+                ClearScreen();
+                printBoundaries(hConsole, csbi);
+                buffer.insert(buffer.begin() + cursorPosition.X, inputChar);
+                printRestrictedArea(hConsole, buffer, buffer.size());
             }
         }
 
@@ -272,7 +286,9 @@ int main(int argc, char* argv[]) {
     
     //Reading and checking for bytes.
     if (ReadFile(fileHandle, bufferOriginal, fileSize, &bytesRead, NULL) || bytesRead != fileSize) {
+
         std::vector<char> buffer(bufferOriginal, bufferOriginal + fileSize);
+
         printRestrictedArea(hConsole, buffer, fileSize);
         hThreadtoKey = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)keyListens, &buffer, 0, NULL);
         
